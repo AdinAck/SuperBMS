@@ -1,3 +1,12 @@
+# Battery Management System Embedded OS
+# https://github.com/AdinAck/SuperBMS
+# Please feel free to post issues or questions on the GitHub repository.
+# By Adin Ackerman
+# ======================================================================================================================
+# MODIFY AT YOUR OWN RISK!
+# I AM NOT RESPONSIBLE FOR ANY DAMAGE CAUSED BY USAGE OF THIS MATERIAL.
+# ======================================================================================================================
+
 import board
 import digitalio
 import analogio

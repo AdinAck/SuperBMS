@@ -1,7 +1,10 @@
 # Battery Management System Embedded OS
-# https://github.com/AdinAck/Fantasy-Bike/tree/master/BMS
+# https://github.com/AdinAck/SuperBMS
 # Please feel free to post issues or questions on the GitHub repository.
-# By Adin Ackerman and Artin Kim
+# By Adin Ackerman
+# ======================================================================================================================
+# MODIFY AT YOUR OWN RISK!
+# I AM NOT RESPONSIBLE FOR ANY DAMAGE CAUSED BY USAGE OF THIS MATERIAL.
 # ======================================================================================================================
 
 # NVM Index:
