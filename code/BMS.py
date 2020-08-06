@@ -44,13 +44,13 @@
 # 10001000 = Verbosity                                        Boolean
 
 # Reading:
-# Bits     | Description                  | Value type
-# 00000001 = Total battery voltage          Float
-# 00000010 = Battery capacity (percentage)  Integer
-# 00000011 = Mean cell voltage              Float
-# 00000100 = All cell voltages              List of floats
-# 00000101 = Board temperatures             List of floats
-# 00000110 = Status (Error or not)          Boolean
+# Bits     | Description                  | Value type     | # of bytes
+# 00000001 = Total battery voltage          Float            7
+# 00000010 = Battery capacity (percentage)  Integer          2
+# 00000011 = Mean cell voltage              Float            7
+# 00000100 = All cell voltages              List of floats   160
+# 00000101 = Board temperatures             List of floats   30
+# 00000110 = Status (Error or not)          Integer          1
 
 import board
 import busio
