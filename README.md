@@ -1,5 +1,5 @@
 # SuperBMS
- A versatile open-source battery management system.
+ A versatile open-source battery management system designed for use in tandem with a central computer/microcontroller.
 
 # Features
 - Supports 4-20 Cells
