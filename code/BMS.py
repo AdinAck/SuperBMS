@@ -5,7 +5,8 @@
 # ======================================================================================================================
 
 # NVM Index:
-# 0x0: 0 if measurement/battery fault has not been detected
+# 0x0: 0 no errors
+#      1 if battery is at a critically low charge
 #      1 if measurement/battery fault has been detected
 
 # SERCOM usage:
@@ -41,16 +42,19 @@
 # 10000101 = Target cell voltage                              Float / Integer
 # 10000110 = Maximum cell voltage difference (for balancing)  Float / Integer
 # 10000111 = Time for charge/balance between measurements     Integer
-# 10001000 = Verbosity                                        Boolean
+# 10001000 = Verbosity                                        Integer 0,1
+# 10001001 = Force charge                                     Integer 0,1
 
 # Reading:
 # Bits     | Description                  | Value type     | # of bytes
 # 00000001 = Total battery voltage          Float            7
 # 00000010 = Battery capacity (percentage)  Integer          2
 # 00000011 = Mean cell voltage              Float            7
-# 00000100 = All cell voltages              List of floats   160
-# 00000101 = Board temperatures             List of floats   30
-# 00000110 = Status (Error or not)          Integer          1
+# 00000100 = Minimum cell voltage           Float            7
+# 00000101 = Maximum cell voltage           Float            7
+# 00000110 = All cell voltages              List of floats   160
+# 00000111 = Board temperatures             List of floats   30
+# 00001000 = Status                         List of integers 7
 
 import board
 import busio
@@ -60,14 +64,27 @@ from digitalio import Direction
 import adafruit_dotstar as dotstar
 
 class BMS:
-    def __init__(self, ADS1248, mcpArr, tmpArr, buzzer, relay, fan):
-        self.mode = 0 # 0 = idle, 1 = chg/dschg/storage, 2 = shutdown
+    def __init__(self, ADS1248, mcpArr, tmpArr, buzzer, relay, mos, fan):
+        # Defaults for user programmable variables
+        self.mode = 0 # 0 = idle, 1 = chg/bal/dschg, 2 = low power
+        self.cellCount = 20
+        self.maxTemp = 80
+        self.fanTrigger = 50
+        self.minVoltage = 3.4
+        self.maxVoltage = 4.25
+        self.targetVoltage = 3.85
+        self.warningVoltage = 3.6
+        self.shutdownVoltage = 3
+        self.dV = .01
+        self.balTime = 32
+        self.errorDetect = .05
+        self.verbose = False
+
         BMS.ADS1248 = ADS1248
         ADS1248.wakeupAll()
         ADS1248.wregAll(2,[0x40,0x03])
         print("[INFO] Calibrating ADCs.")
         ADS1248.selfOffsetAll()
-        self.cellCount = 20
         self.drain = [0]*24
 
         self.mcpArr = mcpArr
@@ -80,35 +97,37 @@ class BMS:
 
         self.tmpArr = tmpArr
         self.temps = [0]*len(tmpArr)
-        self.maxTemp = 80
-        self.fanTrigger = 50
         self.fan = fan
 
         self.buz = buzzer
         self.relay = relay
+        self.mos = mos
 
         self.cellPos = [18, 15, 12, 6, 3, 9, 0, 7, 16, 13, 10, 19, 1, 4, 20, 17, 11, 5, 2, 14]
         self.cells = [0]*self.cellCount
-        self.minVoltage = 3.4
-        self.maxVoltage = 4.25
-        self.targetVoltage = 3.85
-        self.dV = .01
-        self.balTime = 32
+
         self.testBalCount = 0
         self.error = False
+        self.enableCharge = True
+        self.saveBattery = False
 
         self.dot = dotstar.DotStar(board.APA102_SCK, board.APA102_MOSI, 1, brightness=0.5)
 
         # self.log = open("battVoltages.log", "w")
 
-        self.verbose = False
-
-        if microcontroller.nvm[0] == 1:
-            print("[ALERT] A measurement error or severe battery error occured during previous operation.")
-            microcontroller.nvm[0] = 0
 
         self.getCells()
         self.lastCells = list(self.cells)
+
+        if microcontroller.nvm[0] == 1:
+            print("[INFO] Attempting to charge battery...")
+            self.saveBattery = True
+            self.verbose = True
+            self.mode = 1
+
+        elif microcontroller.nvm[0] == 2:
+            print("[ALERT] A measurement error or severe battery error occured during previous operation.")
+            microcontroller.nvm[0] = 0
 
     def getCells(self):
         if self.verbose:
@@ -117,6 +136,10 @@ class BMS:
         for i in range(20):
             self.cells[i] = cellRead[self.cellPos[i]]
         # self.log.write(self.cells)
+        self.minCell = min(self.cells)
+        self.maxCell = max(self.cells)
+        self.minCellIndex = self.cells.index(self.minCell)
+        self.maxCellindex = self.cells.index(self.maxCell)
         self.battVoltage = sum(self.cells)
         self.capacity = min(max(round((100/(84-68))*(self.battVoltage-68)),0),100)
         self.meanVoltage = sum(self.cells)/self.cellCount
@@ -239,6 +262,8 @@ class BMS:
         # All the stuff
         if self.mode == 0 or self.mode == 1:
             self.sendIO()
+            if not self.saveBattery:
+                self.mos.value = True
             if self.mode == 1:
                 if self.verbose:
                     print("[INFO] Allowing cells to settle...")
@@ -249,7 +274,7 @@ class BMS:
                 for i in range(self.cellCount):
                     dCells.append(self.cells[i]-self.lastCells[i])
                 if self.mode == 1:
-                    if max(dCells) > .05 or min(dCells) < -.05:
+                    if max(dCells) > self.errorDetect or min(dCells) < -self.errorDetect:
                         if self.verbose:
                             print("[INFO] Measure error, trying again...")
                         self.error = True
@@ -259,12 +284,16 @@ class BMS:
                 else:
                     break
             if self.error:
-                self.buz.value = True
-                microcontroller.nvm[0] = 1
-                self.mode = 2
+                microcontroller.nvm[0] = 2
+                self.enableCharge = False
                 print("[ALERT] Cell voltage changed rapidly between measurements.\
                        \n\t This could be due to a faulty measurement, or a severe battery issue.\
-                       \n\t To avoid possible damage the BMS will shut down.")
+                       \n\t To avoid possible damage the BMS will not allow charge/balance/discharge.")
+                print("[INFO] Change in voltage per cell:")
+                print(dCells)
+                self.buz.value = True
+                time.sleep(1)
+                self.buz.value = False
 
             if self.verbose:
                 print("[INFO] Mean change in voltage per cell:",sum(dCells)/self.cellCount)
@@ -274,9 +303,7 @@ class BMS:
                 # print("[INFO] All cell voltages:\n",self.cells)
                 print("[INFO] Battery voltage: {}v".format(self.battVoltage))
                 print("[INFO] Battery capacity: {}%".format(self.capacity))
-            if self.mode == 2:
-                return
-            self.buz.value = False
+
             for i in range(self.cellCount):
                 if self.cells[i] > self.maxVoltage:
                     print("\n[ALERT] Cell_{0} is above maximum voltage of {1} at {2}!\n".format(i,self.maxVoltage, self.cells[i]))
@@ -284,16 +311,22 @@ class BMS:
                 elif self.cells[i] < self.minVoltage:
                     print("\n[ALERT] Cell_{0} is below minimum voltage of {1} at {2}!\n".format(i,self.minVoltage, self.cells[i]))
                     self.mode = 2
+
+            if self.minCell < self.shutdownVoltage and not self.saveBattery:
+                print("[ALERT] Minimum cell voltage is below shutdown voltage, so...shutting down.")
+                microcontroller.nvm[0] = 1
+                self.mode = 2
+
+            if self.minCell > self.shutdownVoltage +.1:
+                self.saveBattery = False
+                print("[INFO] Battery has successfully recovered.")
+
             if self.mode == 2:
                 self.buz.value = True
                 time.sleep(1)
                 self.buz.value = False
                 return
 
-            self.minCell = min(self.cells)
-            self.maxCell = max(self.cells)
-            self.minCellIndex = self.cells.index(self.minCell)
-            self.maxCellindex = self.cells.index(self.maxCell)
             if self.verbose:
                 print("[INFO] Minimum cell is Cell_{0} with voltage of {1}v.".format(self.minCellIndex,self.minCell))
                 print("[INFO] Maximum cell is Cell_{0} with voltage of {1}v.".format(self.maxCellindex,self.maxCell))
@@ -304,13 +337,17 @@ class BMS:
                 return
 
         if self.mode == 1:
-            if max(self.temps) < self.maxTemp:
-                status = self.balance()
+            if self.enableCharge:
+                if max(self.temps) < self.maxTemp:
+                    status = self.balance()
+                else:
+                    print("[INFO] Unable to charge/balance due to high temperatures.")
             else:
-                print("[INFO] Unable to charge/balance due to high temperatures.")
+                print("[INFO] Charge/balance/discharge is not enabled due to a battery measurement error.")
 
         elif self.mode == 2:
             self.buz.value = False
+            self.mos.value = False
             self.relay.value = False
             self.drain = [0]*self.cellCount
             self.sendIO()
@@ -357,7 +394,7 @@ class BMS:
                     elif command == 134: # Maximum cell voltage difference (for balancing)
                         self.dV = float(data)
                         if self.verbose:
-                            print("[INFO] Set maximum cell voltage difference",float(data))
+                            print("[INFO] Set maximum cell voltage difference for balancing to",float(data))
                     elif command == 135: # Time for charge/balance between measurements
                         self.balTime = int(data)
                         if self.verbose:
@@ -366,7 +403,6 @@ class BMS:
                         self.verbose = bool(data)
                         if self.verbose:
                             print("[INFO] Set verbosity to",bool(data))
-
 
                 elif command < 128: # Requesting information from BMS
                     if command == 1: # Battery voltage | 7 bytes
@@ -383,25 +419,48 @@ class BMS:
                         self.uart.write(bytes(''.join(["0" for i in range(7-len(str(self.meanVoltage)))]), 'utf-8'))
                         if self.verbose:
                             print("[UART] Sent mean cell voltage.")
-                    elif command == 4: # All cell voltages | 160 bytes
+                    elif command == 4:
+                        self.uart.write(bytes(str(self.minCell),'utf-8'))
+                        self.uart.write(bytes(''.join(["0" for i in range(7-len(str(self.minCell)))]), 'utf-8'))
+                        if self.verbose:
+                            print("[UART] Sent minimum cell voltage.")
+                    elif command == 5:
+                        self.uart.write(bytes(str(self.maxCell),'utf-8'))
+                        self.uart.write(bytes(''.join(["0" for i in range(7-len(str(self.maxCell)))]), 'utf-8'))
+                        if self.verbose:
+                            print("[UART] Sent maximum cell voltage.")
+                    elif command == 6: # All cell voltages | 160 bytes
                         for cell in self.cells:
                             self.uart.write(bytes(str(cell),'utf-8'))
                             self.uart.write(bytes(''.join(["0" for i in range(7-len(str(cell)))]), 'utf-8')+bytes("\n", 'utf-8'))
                         if self.verbose:
                             print("[UART] Sent all cell voltages.")
-                    elif command == 5: # Temperatures | 30 bytes
+                    elif command == 7: # Temperatures | 30 bytes
                         for temp in self.temps:
                             self.uart.write(bytes(str(temp),'utf-8'))
                             self.uart.write(bytes(''.join(["0" for i in range(5-len(str(temp)))]), 'utf-8')+bytes("\n", 'utf-8'))
                         if self.verbose:
                             print("[UART] Sent all temperatures.")
-                    elif command == 6: # Status | 1 byte
+                    elif command == 8: # Status | 7 bytes
+                        status = [0]*7
                         if self.mode == 2:
-                            self.uart.write(bytes("1", 'utf-8'))
-                        else:
-                            self.uart.write(bytes("0", 'utf-8'))
+                            status[0] = 1
+                        if self.minCell < self.warningVoltage:
+                            status[1] = 1
+                        if self.minCell < self.minVoltage:
+                            status [2] = 1
+                        if self.maxCell > self.maxVoltage:
+                            status[3] = 1
+                        if microcontroller.nvm[0] == 2: # Fatal measurement/battery error
+                            status[4] = 1
+                        if self.maxCell - self.minCell > self.dV:
+                            status[5] = 1
+                        if self.maxCell - self.minCell > self.dV2:
+                            status[6] = 1
+                        if max(self.temps) > self.maxTemp:
+                            status[7] = 1
                         if self.verbose:
-                            print("[UART] Sent current status.")
+                            print("[UART] Sent status summary.")
             except ValueError:
                 self.uart.write(bytes(255))
                 if self.verbose:

@@ -15,6 +15,9 @@ buz.direction = digitalio.Direction.OUTPUT
 relay = digitalio.DigitalInOut(board.A4)
 relay.direction = digitalio.Direction.OUTPUT
 
+mos = digitalio.DigitalInOut(board.D5)
+mos.direction = digitalio.Direction.OUTPUT
+
 # SERCOM
 spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -44,7 +47,7 @@ fan = digitalio.DigitalInOut(board.A5)
 fan.direction = digitalio.Direction.OUTPUT
 
 # BMS
-bms = BMS(ADS1248, [mcp0, mcp1, mcp2], [tmp0, tmp1, tmp2, tmp3], buz, relay, fan)
+bms = BMS(ADS1248, [mcp0, mcp1, mcp2], [tmp0, tmp1, tmp2, tmp3], buz, relay, mos, fan)
 bms.verbose = True
 
 try:
