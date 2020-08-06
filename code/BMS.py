@@ -455,10 +455,8 @@ class BMS:
                             status[4] = 1
                         if self.maxCell - self.minCell > self.dV:
                             status[5] = 1
-                        if self.maxCell - self.minCell > self.dV2:
-                            status[6] = 1
                         if max(self.temps) > self.maxTemp:
-                            status[7] = 1
+                            status[6] = 1
                         if self.verbose:
                             print("[UART] Sent status summary.")
             except ValueError:
