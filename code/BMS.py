@@ -75,7 +75,7 @@ class BMS:
             mcp.iodir = 0x00
             mcp.gpio = 0x00
 
-        self.uart = busio.UART(board.TX, board.RX, baudrate=9600, timeout=.1, receive_buffer_size=16)
+        self.uart = busio.UART(board.TX, board.RX, baudrate=9600, timeout=.1, receiver_buffer_size=16)
         self.uart.write(bytes([127]))
 
         self.tmpArr = tmpArr
@@ -240,13 +240,11 @@ class BMS:
         recv = self.uart.read(1)
         if recv != None:
             command = recv[0]
-            data = ''.join([chr(i) for i in self.uart.read()])
             print("[UART] Received command:",command)
-            print("[UART] Received data:",data)
             try:
-                if self.uart.read() != None: # If extra bytes were sent
-                    raise ValueError()
-                elif command >= 128: # Writing information to BMS
+                if command >= 128: # Writing information to BMS
+                    data = ''.join([chr(i) for i in self.uart.read()])
+                    print("[UART] Received data:",data)
                     if command == 128: # Mode
                         if data == "0":
                             self.mode = 0
@@ -293,7 +291,7 @@ class BMS:
                 elif command < 128: # Requesting information from BMS
                     if command == 1: # Battery voltage | 7 bytes
                         self.uart.write(bytes(str(self.battVoltage),'utf-8'))
-                        self.uart.write(bytes(["0" for i in range(7-len(str(self.battVoltage)))]))
+                        self.uart.write(bytes(''.join(["0" for i in range(7-len(str(self.battVoltage)))]), 'utf-8'))
                         if self.verbose:
                             print("[UART] Sent battery voltage.")
                     elif command == 2: # Battery capacity | 2 bytes
@@ -302,19 +300,19 @@ class BMS:
                             print("[UART] Sent battery capacity.")
                     elif command == 3: # Mean cell voltage | 7 bytes
                         self.uart.write(bytes(str(self.meanVoltage),'utf-8'))
-                        self.uart.write(bytes(["0" for i in range(7-len(str(self.meanVoltage)))]))
+                        self.uart.write(bytes(''.join(["0" for i in range(7-len(str(self.meanVoltage)))]), 'utf-8'))
                         if self.verbose:
                             print("[UART] Sent mean cell voltage.")
-                    elif command == 4: # All cell voltages | 140 bytes
+                    elif command == 4: # All cell voltages | 160 bytes
                         for cell in self.cells:
                             self.uart.write(bytes(str(cell),'utf-8'))
-                            self.uart.write(bytes(["0" for i in range(7-len(str(cell)))]))
+                            self.uart.write(bytes(''.join(["0" for i in range(7-len(str(cell)))]), 'utf-8')+bytes("\n", 'utf-8'))
                         if self.verbose:
                             print("[UART] Sent all cell voltages.")
-                    elif command == 5: # Temperatures | 25 bytes
+                    elif command == 5: # Temperatures | 30 bytes
                         for temp in self.temps:
                             self.uart.write(bytes(str(temp),'utf-8'))
-                            self.uart.write(bytes(["0" for i in range(5-len(str(temp)))]))
+                            self.uart.write(bytes(''.join(["0" for i in range(5-len(str(temp)))]), 'utf-8')+bytes("\n", 'utf-8'))
                         if self.verbose:
                             print("[UART] Sent all temperatures.")
                     elif command == 6: # Status | 1 byte
