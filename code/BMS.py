@@ -1,17 +1,59 @@
 # Battery Management System Embedded OS
-# https://github.com/AdinAck/SuperBMS
+# https://github.com/AdinAck/Fantasy-Bike/tree/master/BMS
 # Please feel free to post issues or questions on the GitHub repository.
-# By Adin Ackerman
-# ======================================================================================================================
-# MODIFY AT YOUR OWN RISK!
-# I AM NOT RESPONSIBLE FOR ANY DAMAGE CAUSED BY USAGE OF THIS MATERIAL.
+# By Adin Ackerman and Artin Kim
 # ======================================================================================================================
 
 # NVM Index:
 # 0x0: 0 if measurement/battery fault has not been detected
 #      1 if measurement/battery fault has been detected
 
+# SERCOM usage:
+# Writing:
+
+# 1xxxxxxx + xxxxxxxx + ...
+# Instruction + Data (up to 63 bytes)
+
+# Receive:
+# 11111111 If successful
+
+
+
+# Reading:
+# 0xxxxxxx
+# Instruction
+
+# Receive:
+# xxxxxxxx + ...
+# Data
+
+
+
+# SERCOM Instructions:
+# Writing:
+# Bits     | Description                                    | Value type
+# ===========================================================================
+# 10000000 = Mode                                             Integer 0,1,2
+# 10000001 = Maximum temperature                              Float / Integer
+# 10000010 = Fan trigger temperature                          Float / Integer
+# 10000011 = Minimum cell voltage                             Float / Integer
+# 10000100 = Maximum cell voltage                             Float / Integer
+# 10000101 = Target cell voltage                              Float / Integer
+# 10000110 = Maximum cell voltage difference (for balancing)  Float / Integer
+# 10000111 = Time for charge/balance between measurements     Integer
+# 10001000 = Verbosity                                        Boolean
+
+# Reading:
+# Bits     | Description                  | Value type
+# 00000001 = Total battery voltage          Float
+# 00000010 = Battery capacity (percentage)  Integer
+# 00000011 = Mean cell voltage              Float
+# 00000100 = All cell voltages              List of floats
+# 00000101 = Board temperatures             List of floats
+# 00000110 = Status (Error or not)          Boolean
+
 import board
+import busio
 import microcontroller
 import time
 from digitalio import Direction
@@ -33,10 +75,13 @@ class BMS:
             mcp.iodir = 0x00
             mcp.gpio = 0x00
 
+        self.uart = busio.UART(board.TX, board.RX, baudrate=9600, timeout=.1)
+        self.uart.write(bytes([127]))
+
         self.tmpArr = tmpArr
         self.temps = [0]*len(tmpArr)
         self.maxTemp = 80
-        self.fanTrigger = 40
+        self.fanTrigger = 50
         self.fan = fan
 
         self.buz = buzzer
@@ -50,8 +95,9 @@ class BMS:
         self.dV = .01
         self.balTime = 32
         self.testBalCount = 0
+        self.error = False
 
-        self.dot = dotstar.DotStar(board.APA102_SCK, board.APA102_MOSI, 1, brightness=0.1)
+        self.dot = dotstar.DotStar(board.APA102_SCK, board.APA102_MOSI, 1, brightness=0.5)
 
         # self.log = open("battVoltages.log", "w")
 
@@ -190,6 +236,98 @@ class BMS:
             self.relay.value = False
 
     def update(self):
+        # Sercom
+        recv = self.uart.read(64)
+        if recv != None:
+            command = recv[0]
+            data = ''.join([chr(i) for i in recv[1:]])
+            print("[UART] Received command:",command)
+            print("[UART] Received data:",data)
+            try:
+                if command >= 128: # Writing information to BMS
+                    if command == 128: # Mode
+                        if data == "0":
+                            self.mode = 0
+                        elif data == "1":
+                            self.mode = 1
+                        elif data == "2":
+                            self.mode = 2
+                        if self.verbose:
+                            print("[INFO] Changed mode to",self.mode)
+                    elif command == 133: # Target cell voltage
+                        self.targetVoltage = float(data)
+                        if self.verbose:
+                            print("[INFO] Set target voltage to",float(data))
+                    elif command == 129: # Maximum temperature
+                        self.maxTemp = float(data)
+                        if self.verbose:
+                            print("[INFO] Set maximum temperature to",float(data))
+                    elif command == 130: # Fan trigger temperature
+                        self.fanTrigger = float(data)
+                        if self.verbose:
+                            print("[INFO] Set fan trigger temperature to",float(data))
+                    elif command == 131: # Minimum cell voltage
+                        self.minVoltage = float(data)
+                        if self.verbose:
+                            print("[INFO] Set minimum cell voltage to",float(data))
+                    elif command == 132: # Maximum cell voltage
+                        self.maxVoltage = float(data)
+                        if self.verbose:
+                            print("[INFO] Set maximum cell voltage to",float(data))
+                    elif command == 134: # Maximum cell voltage difference (for balancing)
+                        self.dV = float(data)
+                        if self.verbose:
+                            print("[INFO] Set maximum cell voltage difference",float(data))
+                    elif command == 135: # Time for charge/balance between measurements
+                        self.balTime = int(data)
+                        if self.verbose:
+                            print("[INFO] Set charge/balance time",int(data))
+                    elif command == 136: # Verbosity
+                        self.verbose = bool(data)
+                        if self.verbose:
+                            print("[INFO] Set verbosity to",bool(data))
+
+
+                elif command < 128: # Requesting information from BMS
+                    if command == 1: # Battery voltage | 7 bytes
+                        self.uart.write(bytes(str(self.battVoltage),'utf-8'))
+                        self.uart.write(bytes(["0" for i in range(7-len(str(self.battVoltage)))]))
+                        if self.verbose:
+                            print("[UART] Sent battery voltage.")
+                    elif command == 2: # Battery capacity | 2 bytes
+                        self.uart.write(bytes(str(self.capacity),'utf-8'))
+                        if self.verbose:
+                            print("[UART] Sent battery capacity.")
+                    elif command == 3: # Mean cell voltage | 7 bytes
+                        self.uart.write(bytes(str(self.meanVoltage),'utf-8'))
+                        self.uart.write(bytes(["0" for i in range(7-len(str(self.meanVoltage)))]))
+                        if self.verbose:
+                            print("[UART] Sent mean cell voltage.")
+                    elif command == 4: # All cell voltages | 140 bytes
+                        for cell in self.cells:
+                            self.uart.write(bytes(str(cell),'utf-8'))
+                            self.uart.write(bytes(["0" for i in range(7-len(str(cell)))]))
+                        if self.verbose:
+                            print("[UART] Sent all cell voltages.")
+                    elif command == 5: # Temperatures | 25 bytes
+                        for temp in self.temps:
+                            self.uart.write(bytes(str(temp),'utf-8'))
+                            self.uart.write(bytes(["0" for i in range(5-len(str(temp)))]))
+                        if self.verbose:
+                            print("[UART] Sent all temperatures.")
+                    elif command == 6: # Status | 1 byte
+                        if self.mode == 2:
+                            self.uart.write(bytes("1", 'utf-8'))
+                        else:
+                            self.uart.write(bytes("0", 'utf-8'))
+                        if self.verbose:
+                            print("[UART] Sent current status.")
+            except ValueError:
+                self.uart.write(bytes(255))
+                if self.verbose:
+                    print("[INFO] UART command was formatted incorrectly.")
+
+        # All the stuff
         if self.mode == 0 or self.mode == 1:
             self.sendIO()
             if self.mode == 1:
@@ -201,12 +339,15 @@ class BMS:
                 dCells = []
                 for i in range(self.cellCount):
                     dCells.append(self.cells[i]-self.lastCells[i])
-                if max(dCells) > .05 or min(dCells) < -.05:
-                    if self.verbose:
-                        print("[INFO] Measure error, trying again...")
-                    self.error = True
+                if self.mode == 1:
+                    if max(dCells) > .05 or min(dCells) < -.05:
+                        if self.verbose:
+                            print("[INFO] Measure error, trying again...")
+                        self.error = True
+                    else:
+                        self.error = False
+                        break
                 else:
-                    self.error = False
                     break
             if self.error:
                 self.buz.value = True

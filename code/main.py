@@ -1,12 +1,3 @@
-# Battery Management System Embedded OS
-# https://github.com/AdinAck/SuperBMS
-# Please feel free to post issues or questions on the GitHub repository.
-# By Adin Ackerman
-# ======================================================================================================================
-# MODIFY AT YOUR OWN RISK!
-# I AM NOT RESPONSIBLE FOR ANY DAMAGE CAUSED BY USAGE OF THIS MATERIAL.
-# ======================================================================================================================
-
 import board
 import digitalio
 import analogio
@@ -55,15 +46,16 @@ fan.direction = digitalio.Direction.OUTPUT
 # BMS
 bms = BMS(ADS1248, [mcp0, mcp1, mcp2], [tmp0, tmp1, tmp2, tmp3], buz, relay, fan)
 bms.verbose = True
-bms.mode = 1
+
 try:
     while True:
         bms.update()
-except:
+except (Exception, KeyboardInterrupt) as e:
     buz.value = True
     time.sleep(.1)
     bms.relay.value = False
-    print("[INFO] An exception occured.")
+    print("[INFO] An exception occured:")
+    print(e)
     print("[INFO] Wrapping things up...")
     for mcp in [mcp0, mcp1, mcp2]:
         mcp.gpio = 0
@@ -72,8 +64,9 @@ except:
     ADS1248.sleepAll()
     print("[INFO] ADCs put to sleep.")
     buz.value = False
+    bms.uart.write(bytes("Error", 'utf-8'))
     print("[INFO] Cooling down...")
-    while max(bms.temps) > 40:
+    while max(bms.temps) > bms.fanTrigger:
         bms.getTemps()
         time.sleep(1)
     print("[INFO] Done.")
