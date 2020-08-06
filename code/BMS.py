@@ -75,7 +75,7 @@ class BMS:
             mcp.iodir = 0x00
             mcp.gpio = 0x00
 
-        self.uart = busio.UART(board.TX, board.RX, baudrate=9600, timeout=.1)
+        self.uart = busio.UART(board.TX, board.RX, baudrate=9600, timeout=.1, receive_buffer_size=16)
         self.uart.write(bytes([127]))
 
         self.tmpArr = tmpArr
@@ -237,14 +237,16 @@ class BMS:
 
     def update(self):
         # Sercom
-        recv = self.uart.read(64)
+        recv = self.uart.read(1)
         if recv != None:
             command = recv[0]
-            data = ''.join([chr(i) for i in recv[1:]])
+            data = ''.join([chr(i) for i in self.uart.read()])
             print("[UART] Received command:",command)
             print("[UART] Received data:",data)
             try:
-                if command >= 128: # Writing information to BMS
+                if self.uart.read() != None: # If extra bytes were sent
+                    raise ValueError()
+                elif command >= 128: # Writing information to BMS
                     if command == 128: # Mode
                         if data == "0":
                             self.mode = 0
@@ -325,7 +327,7 @@ class BMS:
             except ValueError:
                 self.uart.write(bytes(255))
                 if self.verbose:
-                    print("[INFO] UART command was formatted incorrectly.")
+                    print("[ALERT] UART command was formatted incorrectly. Discarding.")
 
         # All the stuff
         if self.mode == 0 or self.mode == 1:
