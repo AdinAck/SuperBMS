@@ -14,3 +14,6 @@
 
 ## Measurement
 The SuperBMS utilizes Texas Instruments' [ADS1248](https://www.ti.com/lit/ds/symlink/ads1248.pdf?ts=1596011900933&ref_url=https%253A%252F%252Fwww.ti.com%252Fproduct%252FADS1248) ADCs and [INA149](https://www.ti.com/lit/ds/symlink/ina149.pdf?ts=1596011892251&ref_url=https%253A%252F%252Fwww.google.com%252F) op-amps to provide between 20 and 22 bits (a few microvolts) of accuracy.
+
+## How to use?
+Refer to the [wiki](https://github.com/AdinAck/SuperBMS/wiki) for all the information.
