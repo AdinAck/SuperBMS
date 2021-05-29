@@ -1,6 +1,9 @@
 # SuperBMS
  A versatile open-source battery management system designed for use in tandem with a central computer/microcontroller.
 
+![](https://github.com/AdinAck/Wiki-Images/blob/main/SuperBMS/3d.png)
+![](https://github.com/AdinAck/Wiki-Images/blob/main/SuperBMS/real.jpg)
+
 # Features
 - Supports 4-20 Cells
 - 24-bit ADCs
