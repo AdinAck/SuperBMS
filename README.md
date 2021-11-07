@@ -7,7 +7,6 @@
 # Features
 - Supports 4-20 Cells
 - 24-bit ADCs
-- Low quiescent current
 - Customizable code (CircuitPython)
 - Electrically isolated serial interface
 - Flexible discharge resistor configuration
